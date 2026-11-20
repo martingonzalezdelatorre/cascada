@@ -58,7 +58,7 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final engine = GameEngine();
   final _focus = FocusNode();
   late final Ticker _ticker;
@@ -78,11 +78,22 @@ class _GameScreenState extends State<GameScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ticker = createTicker(_onTick)..start();
+  }
+
+  /// Pausa sola si la app pasa a segundo plano.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _started && !engine.gameOver) {
+      engine.pause();
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _bannerTimer?.cancel();
     _focus.dispose();
@@ -147,11 +158,26 @@ class _GameScreenState extends State<GameScreen>
 
     if (!_started || engine.gameOver) {
       if (!isRepeat &&
-          (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.space)) {
+          (k == LogicalKeyboardKey.enter ||
+              k == LogicalKeyboardKey.space ||
+              (_started && k == LogicalKeyboardKey.keyR))) {
         _start();
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
+    }
+
+    // R: con la partida en marcha pausa (el overlay ofrece Reiniciar);
+    // ya en pausa, reinicia.
+    if (k == LogicalKeyboardKey.keyR) {
+      if (!isRepeat) {
+        if (engine.paused) {
+          _start();
+        } else {
+          _act(engine.pause);
+        }
+      }
+      return KeyEventResult.handled;
     }
 
     final repeatable = <LogicalKeyboardKey, VoidCallback>{
@@ -195,89 +221,93 @@ class _GameScreenState extends State<GameScreen>
           ),
         ),
         child: SafeArea(
-        child: Focus(
-          focusNode: _focus,
-          autofocus: true,
-          onKeyEvent: _onKey,
-          // Lienzo con un tamaño mínimo de diseño (560x740) que se escala
-          // para que el juego ocupe toda la ventana, sin bandas vacías.
-          child: LayoutBuilder(builder: (context, box) {
-            // Pantallas verticales (teléfono): diseño propio a tamaño real.
-            if (box.maxWidth < box.maxHeight * 0.75) {
-              return _portraitLayout();
-            }
-            const minW = 560.0, minH = 740.0;
-            final s = min(box.maxWidth / minW, box.maxHeight / minH);
-            return FittedBox(
-              fit: BoxFit.fill,
-              child: SizedBox(
-                width: box.maxWidth / s,
-                height: box.maxHeight / s,
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Align(
-                                alignment: Alignment.topRight,
-                                child: ConstrainedBox(
-                                  constraints:
-                                      const BoxConstraints(maxWidth: 220),
-                                  child: _leftPanel(),
+          child: Focus(
+            focusNode: _focus,
+            autofocus: true,
+            onKeyEvent: _onKey,
+            // Lienzo con un tamaño mínimo de diseño (560x740) que se escala
+            // para que el juego ocupe toda la ventana, sin bandas vacías.
+            child: LayoutBuilder(
+              builder: (context, box) {
+                // Pantallas verticales (teléfono): diseño propio a tamaño real.
+                if (box.maxWidth < box.maxHeight * 0.75) {
+                  return _portraitLayout();
+                }
+                const minW = 560.0, minH = 740.0;
+                final s = min(box.maxWidth / minW, box.maxHeight / minH);
+                return FittedBox(
+                  fit: BoxFit.fill,
+                  child: SizedBox(
+                    width: box.maxWidth / s,
+                    height: box.maxHeight / s,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.topRight,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 220,
+                                      ),
+                                      child: _leftPanel(),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Center(
-                              child: AspectRatio(
-                                aspectRatio:
-                                    GameEngine.cols / GameEngine.rows,
-                                child: _boardArea(),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Align(
-                                alignment: Alignment.topLeft,
-                                child: ConstrainedBox(
-                                  constraints:
-                                      const BoxConstraints(maxWidth: 220),
-                                  child: _rightPanel(),
+                                const SizedBox(width: 8),
+                                Center(
+                                  child: AspectRatio(
+                                    aspectRatio:
+                                        GameEngine.cols / GameEngine.rows,
+                                    child: _boardArea(),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.topLeft,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 220,
+                                      ),
+                                      child: _rightPanel(),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        ExcludeFocus(child: _controls()),
+                      ],
                     ),
-                    ExcludeFocus(child: _controls()),
-                  ],
-                ),
-              ),
-            );
-          }),
-        ),
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ),
     );
   }
 
   BoxDecoration _glass({Color? tint}) => BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            (tint ?? Colors.white).withValues(alpha: 0.10),
-            (tint ?? Colors.white).withValues(alpha: 0.04),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      );
+    gradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        (tint ?? Colors.white).withValues(alpha: 0.10),
+        (tint ?? Colors.white).withValues(alpha: 0.04),
+      ],
+    ),
+    borderRadius: BorderRadius.circular(16),
+    border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+  );
 
   Widget _portraitLayout() {
     final active = _started;
@@ -289,13 +319,16 @@ class _GameScreenState extends State<GameScreen>
         ? 1 - engine.linesToNextLevel / GameEngine.linesPerLevel
         : 0.0;
 
-    Widget label(String t) => Text(t,
-        maxLines: 1,
-        style: const TextStyle(
-            fontSize: 10,
-            letterSpacing: 1.2,
-            color: Colors.white54,
-            fontWeight: FontWeight.w700));
+    Widget label(String t) => Text(
+      t,
+      maxLines: 1,
+      style: const TextStyle(
+        fontSize: 10,
+        letterSpacing: 1.2,
+        color: Colors.white54,
+        fontWeight: FontWeight.w700,
+      ),
+    );
 
     // Anillo de nivel con el progreso hacia el siguiente.
     final levelRing = SizedBox(
@@ -330,18 +363,24 @@ class _GameScreenState extends State<GameScreen>
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('NIVEL',
-                  style: TextStyle(
-                      fontSize: 9,
-                      letterSpacing: 1.5,
-                      color: Colors.white60,
-                      fontWeight: FontWeight.w700)),
-              Text('$level',
-                  style: const TextStyle(
-                      fontSize: 32,
-                      height: 1.0,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white)),
+              const Text(
+                'NIVEL',
+                style: TextStyle(
+                  fontSize: 9,
+                  letterSpacing: 1.5,
+                  color: Colors.white60,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                '$level',
+                style: const TextStyle(
+                  fontSize: 32,
+                  height: 1.0,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                ),
+              ),
             ],
           ),
         ],
@@ -360,8 +399,10 @@ class _GameScreenState extends State<GameScreen>
           Expanded(
             child: CustomPaint(
               size: Size.infinite,
-              painter: MiniPiecePainter(active ? engine.hold : null,
-                  dim: engine.holdUsed),
+              painter: MiniPiecePainter(
+                active ? engine.hold : null,
+                dim: engine.holdUsed,
+              ),
             ),
           ),
         ],
@@ -386,7 +427,8 @@ class _GameScreenState extends State<GameScreen>
                     child: CustomPaint(
                       size: Size.infinite,
                       painter: MiniPiecePainter(
-                          preview.isNotEmpty ? preview[0] : null),
+                        preview.isNotEmpty ? preview[0] : null,
+                      ),
                     ),
                   ),
                   for (var i = 1; i < rules.previewCount; i++)
@@ -397,7 +439,8 @@ class _GameScreenState extends State<GameScreen>
                         child: CustomPaint(
                           size: Size.infinite,
                           painter: MiniPiecePainter(
-                              i < preview.length ? preview[i] : null),
+                            i < preview.length ? preview[i] : null,
+                          ),
                         ),
                       ),
                     ),
@@ -423,11 +466,14 @@ class _GameScreenState extends State<GameScreen>
           children: [
             Icon(icon, size: big ? 16 : 13, color: c),
             const SizedBox(width: 5),
-            Text(text,
-                style: TextStyle(
-                    fontSize: big ? 15 : 11,
-                    fontWeight: big ? FontWeight.w800 : FontWeight.w600,
-                    color: big ? Colors.white : c)),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: big ? 15 : 11,
+                fontWeight: big ? FontWeight.w800 : FontWeight.w600,
+                color: big ? Colors.white : c,
+              ),
+            ),
           ],
         ),
       );
@@ -454,22 +500,39 @@ class _GameScreenState extends State<GameScreen>
               runSpacing: 4,
               alignment: WrapAlignment.center,
               children: [
-                pill(Icons.star_rounded, '${active ? engine.score : 0}',
-                    color: Colors.amberAccent, big: true),
-                pill(Icons.view_headline_rounded,
-                    '${active ? engine.lines : 0} líneas'),
-                pill(Icons.bolt_rounded,
-                    '×${rules.speedFactor.toStringAsFixed(1)}',
-                    color: Colors.lightBlueAccent),
+                pill(
+                  Icons.star_rounded,
+                  '${active ? engine.score : 0}',
+                  color: Colors.amberAccent,
+                  big: true,
+                ),
+                pill(
+                  Icons.view_headline_rounded,
+                  '${active ? engine.lines : 0} líneas',
+                ),
+                pill(
+                  Icons.bolt_rounded,
+                  '×${rules.speedFactor.toStringAsFixed(1)}',
+                  color: Colors.lightBlueAccent,
+                ),
                 if (every != null)
-                  pill(Icons.vertical_align_top_rounded, 'basura c/$every',
-                      color: Colors.orangeAccent),
+                  pill(
+                    Icons.vertical_align_top_rounded,
+                    'basura c/$every',
+                    color: Colors.orangeAccent,
+                  ),
                 if (rules.extraPiecesEnabled)
-                  pill(Icons.category_rounded, 'piezas extra',
-                      color: Colors.pinkAccent),
+                  pill(
+                    Icons.category_rounded,
+                    'piezas extra',
+                    color: Colors.pinkAccent,
+                  ),
                 if (!rules.ghostEnabled)
-                  pill(Icons.visibility_off_rounded, 'sin fantasma',
-                      color: Colors.redAccent),
+                  pill(
+                    Icons.visibility_off_rounded,
+                    'sin fantasma',
+                    color: Colors.redAccent,
+                  ),
               ],
             ),
           ),
@@ -490,48 +553,50 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _boardArea() {
-    return LayoutBuilder(builder: (context, c) {
-      final cell = c.maxWidth / GameEngine.cols;
-      return GestureDetector(
-        onTap: () => _act(engine.rotate),
-        onPanStart: (_) => _dragX = _dragY = 0,
-        onPanUpdate: (d) {
-          _dragX += d.delta.dx;
-          _dragY += d.delta.dy;
-          while (_dragX > cell) {
-            _dragX -= cell;
-            _act(engine.moveRight);
-          }
-          while (_dragX < -cell) {
-            _dragX += cell;
-            _act(engine.moveLeft);
-          }
-          while (_dragY > cell) {
-            _dragY -= cell;
-            _act(engine.softDrop);
-          }
-        },
-        onPanEnd: (d) {
-          if (d.velocity.pixelsPerSecond.dy > 1500) _act(engine.hardDrop);
-        },
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: CustomPaint(
-                painter: BoardPainter(engine, showPiece: _started),
+    return LayoutBuilder(
+      builder: (context, c) {
+        final cell = c.maxWidth / GameEngine.cols;
+        return GestureDetector(
+          onTap: () => _act(engine.rotate),
+          onPanStart: (_) => _dragX = _dragY = 0,
+          onPanUpdate: (d) {
+            _dragX += d.delta.dx;
+            _dragY += d.delta.dy;
+            while (_dragX > cell) {
+              _dragX -= cell;
+              _act(engine.moveRight);
+            }
+            while (_dragX < -cell) {
+              _dragX += cell;
+              _act(engine.moveLeft);
+            }
+            while (_dragY > cell) {
+              _dragY -= cell;
+              _act(engine.softDrop);
+            }
+          },
+          onPanEnd: (d) {
+            if (d.velocity.pixelsPerSecond.dy > 1500) _act(engine.hardDrop);
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: CustomPaint(
+                  painter: BoardPainter(engine, showPiece: _started),
+                ),
               ),
-            ),
-            if (_banner != null && _started && !engine.gameOver)
-              IgnorePointer(child: Center(child: _bannerCard(_banner!))),
-            if (!_started) _menuOverlay(),
-            if (_started && engine.paused) _pauseOverlay(),
-            if (_started && engine.gameOver) _gameOverOverlay(),
-          ],
-        ),
-      );
-    });
+              if (_banner != null && _started && !engine.gameOver)
+                IgnorePointer(child: Center(child: _bannerCard(_banner!))),
+              if (!_started) _menuOverlay(),
+              if (_started && engine.paused) _pauseOverlay(),
+              if (_started && engine.gameOver) _gameOverOverlay(),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Widget _bannerCard(String text) {
@@ -546,15 +611,20 @@ class _GameScreenState extends State<GameScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(lines.first,
-              style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  color: Colors.tealAccent)),
+          Text(
+            lines.first,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              color: Colors.tealAccent,
+            ),
+          ),
           for (final l in lines.skip(1))
-            Text(l,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: Colors.white70)),
+            Text(
+              l,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: Colors.white70),
+            ),
         ],
       ),
     );
@@ -577,12 +647,15 @@ class _GameScreenState extends State<GameScreen>
 
   Widget _menuOverlay() {
     return _overlay([
-      const Text('CASCADA',
-          style: TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 4,
-              color: Colors.tealAccent)),
+      const Text(
+        'CASCADA',
+        style: TextStyle(
+          fontSize: 30,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 4,
+          color: Colors.tealAccent,
+        ),
+      ),
       const Text('de bloques', style: TextStyle(color: Colors.white60)),
       const SizedBox(height: 20),
       const Text('Nivel inicial'),
@@ -595,9 +668,10 @@ class _GameScreenState extends State<GameScreen>
                 : null,
             icon: const Icon(Icons.remove_circle_outline),
           ),
-          Text('$_startLevel',
-              style:
-                  const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(
+            '$_startLevel',
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
           IconButton(
             onPressed: _startLevel < 15
                 ? () => setState(() => _startLevel++)
@@ -615,7 +689,8 @@ class _GameScreenState extends State<GameScreen>
       const SizedBox(height: 16),
       const Text(
         '← → mover · ↑/X girar · Z girar al revés\n'
-        '↓ bajar · Espacio soltar · C guardar · P pausa\n'
+        '↓ bajar · Espacio soltar · C guardar\n'
+        'P pausa · R reiniciar\n'
         'Táctil: toca para girar, arrastra para mover,\n'
         'desliza rápido hacia abajo para soltar.',
         textAlign: TextAlign.center,
@@ -634,12 +709,20 @@ class _GameScreenState extends State<GameScreen>
 
   Widget _pauseOverlay() {
     return _overlay([
-      const Text('PAUSA',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+      const Text(
+        'PAUSA',
+        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+      ),
       const SizedBox(height: 16),
       FilledButton(
         onPressed: () => _act(engine.togglePause),
         child: const Text('Continuar'),
+      ),
+      const SizedBox(height: 4),
+      OutlinedButton.icon(
+        onPressed: _start,
+        icon: const Icon(Icons.replay),
+        label: const Text('Reiniciar'),
       ),
       TextButton(onPressed: _toMenu, child: const Text('Menú')),
     ]);
@@ -647,11 +730,14 @@ class _GameScreenState extends State<GameScreen>
 
   Widget _gameOverOverlay() {
     return _overlay([
-      const Text('FIN DEL JUEGO',
-          style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: Colors.redAccent)),
+      const Text(
+        'FIN DEL JUEGO',
+        style: TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w900,
+          color: Colors.redAccent,
+        ),
+      ),
       const SizedBox(height: 12),
       Text('Puntos: ${engine.score}', style: const TextStyle(fontSize: 18)),
       Text('Nivel ${engine.level} · ${engine.lines} líneas'),
@@ -678,12 +764,15 @@ class _GameScreenState extends State<GameScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: const TextStyle(
-                  fontSize: 10,
-                  letterSpacing: 1.2,
-                  color: Colors.white54,
-                  fontWeight: FontWeight.bold)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 10,
+              letterSpacing: 1.2,
+              color: Colors.white54,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 4),
           child,
         ],
@@ -692,10 +781,12 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _stat(String title, String value) => _box(
-        title,
-        Text(value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      );
+    title,
+    Text(
+      value,
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    ),
+  );
 
   Widget _leftPanel() {
     final active = _started;
@@ -708,8 +799,10 @@ class _GameScreenState extends State<GameScreen>
               height: 48,
               child: CustomPaint(
                 size: Size.infinite,
-                painter: MiniPiecePainter(active ? engine.hold : null,
-                    dim: engine.holdUsed),
+                painter: MiniPiecePainter(
+                  active ? engine.hold : null,
+                  dim: engine.holdUsed,
+                ),
               ),
             ),
           ),
@@ -730,8 +823,9 @@ class _GameScreenState extends State<GameScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                    'faltan ${active ? engine.linesToNextLevel : GameEngine.linesPerLevel}',
-                    style: const TextStyle(fontSize: 11)),
+                  'faltan ${active ? engine.linesToNextLevel : GameEngine.linesPerLevel}',
+                  style: const TextStyle(fontSize: 11),
+                ),
               ],
             ),
           ),
@@ -746,22 +840,27 @@ class _GameScreenState extends State<GameScreen>
     final preview = _started ? engine.preview : const <PieceDef>[];
     final every = rules.garbageEvery;
     Widget rule(IconData icon, String text, bool on) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: Row(
-            children: [
-              Icon(icon,
-                  size: 14,
-                  color: on ? Colors.orangeAccent : Colors.white30),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(text,
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: on ? Colors.white : Colors.white38)),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: on ? Colors.orangeAccent : Colors.white30,
           ),
-        );
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11,
+                color: on ? Colors.white : Colors.white38,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
     return SingleChildScrollView(
       child: Column(
         children: [
@@ -775,7 +874,8 @@ class _GameScreenState extends State<GameScreen>
                     child: CustomPaint(
                       size: Size.infinite,
                       painter: MiniPiecePainter(
-                          i < preview.length ? preview[i] : null),
+                        i < preview.length ? preview[i] : null,
+                      ),
                     ),
                   ),
               ],
@@ -786,10 +886,16 @@ class _GameScreenState extends State<GameScreen>
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                rule(Icons.speed,
-                    'Vel. ×${rules.speedFactor.toStringAsFixed(1)}', true),
-                rule(Icons.vertical_align_top,
-                    every == null ? 'Sin basura' : 'Basura c/$every', every != null),
+                rule(
+                  Icons.speed,
+                  'Vel. ×${rules.speedFactor.toStringAsFixed(1)}',
+                  true,
+                ),
+                rule(
+                  Icons.vertical_align_top,
+                  every == null ? 'Sin basura' : 'Basura c/$every',
+                  every != null,
+                ),
                 rule(Icons.category, 'Piezas extra', rules.extraPiecesEnabled),
                 rule(Icons.visibility_off, 'Sin fantasma', !rules.ghostEnabled),
               ],
@@ -803,22 +909,43 @@ class _GameScreenState extends State<GameScreen>
   Widget _controls() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _CtrlButton(Icons.inventory_2_outlined, () => _act(engine.holdPiece)),
-          _CtrlButton(Icons.arrow_back, () => _act(engine.moveLeft),
-              repeat: true),
-          _CtrlButton(Icons.arrow_downward, () => _act(engine.softDrop),
-              repeat: true),
-          _CtrlButton(Icons.arrow_forward, () => _act(engine.moveRight),
-              repeat: true),
-          _CtrlButton(Icons.rotate_right, () => _act(engine.rotate)),
-          _CtrlButton(
-              Icons.vertical_align_bottom, () => _act(engine.hardDrop)),
-          _CtrlButton(engine.paused ? Icons.play_arrow : Icons.pause,
-              () => _act(engine.togglePause)),
-        ],
+      // FittedBox: con 8 botones, en pantallas estrechas se reducen en vez de desbordar.
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CtrlButton(
+              Icons.inventory_2_outlined,
+              () => _act(engine.holdPiece),
+            ),
+            _CtrlButton(
+              Icons.arrow_back,
+              () => _act(engine.moveLeft),
+              repeat: true,
+            ),
+            _CtrlButton(
+              Icons.arrow_downward,
+              () => _act(engine.softDrop),
+              repeat: true,
+            ),
+            _CtrlButton(
+              Icons.arrow_forward,
+              () => _act(engine.moveRight),
+              repeat: true,
+            ),
+            _CtrlButton(Icons.rotate_right, () => _act(engine.rotate)),
+            _CtrlButton(
+              Icons.vertical_align_bottom,
+              () => _act(engine.hardDrop),
+            ),
+            _CtrlButton(
+              engine.paused ? Icons.play_arrow : Icons.pause,
+              () => _act(engine.togglePause),
+            ),
+            _CtrlButton(Icons.replay, () => _act(engine.pause)),
+          ],
+        ),
       ),
     );
   }
@@ -846,7 +973,9 @@ class _CtrlButtonState extends State<_CtrlButton> {
     if (widget.repeat) {
       _timer = Timer(const Duration(milliseconds: 250), () {
         _timer = Timer.periodic(
-            const Duration(milliseconds: 55), (_) => widget.onAction());
+          const Duration(milliseconds: 55),
+          (_) => widget.onAction(),
+        );
       });
     }
   }
@@ -865,29 +994,32 @@ class _CtrlButtonState extends State<_CtrlButton> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => _press(),
-      onTapUp: (_) => _release(),
-      onTapCancel: _release,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 80),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: _down
-                ? [Colors.teal.shade400, Colors.teal.shade700]
-                : [
-                    Colors.white.withValues(alpha: 0.14),
-                    Colors.white.withValues(alpha: 0.05),
-                  ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: GestureDetector(
+        onTapDown: (_) => _press(),
+        onTapUp: (_) => _release(),
+        onTapCancel: _release,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 80),
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: _down
+                  ? [Colors.teal.shade400, Colors.teal.shade700]
+                  : [
+                      Colors.white.withValues(alpha: 0.14),
+                      Colors.white.withValues(alpha: 0.05),
+                    ],
+            ),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
           ),
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+          child: Icon(widget.icon, size: 22),
         ),
-        child: Icon(widget.icon, size: 22),
       ),
     );
   }
@@ -961,9 +1093,12 @@ class BoardPainter extends CustomPainter {
       for (final (x, y) in p.cellsAt(e.ghostY())) {
         if (y < 0) continue;
         canvas.drawRRect(
-            RRect.fromRectAndRadius(
-                rectAt(x, y).deflate(2), Radius.circular(c * 0.18)),
-            ghost);
+          RRect.fromRectAndRadius(
+            rectAt(x, y).deflate(2),
+            Radius.circular(c * 0.18),
+          ),
+          ghost,
+        );
       }
     }
     for (final (x, y) in p.cells) {
@@ -996,8 +1131,11 @@ class MiniPiecePainter extends CustomPainter {
     var color = pieceColors[d.color]!;
     if (dim) color = color.withValues(alpha: 0.35);
     for (final (x, y) in d.cells) {
-      drawCell(canvas,
-          Rect.fromLTWH(ox + (x - minX) * c, oy + (y - minY) * c, c, c), color);
+      drawCell(
+        canvas,
+        Rect.fromLTWH(ox + (x - minX) * c, oy + (y - minY) * c, c, c),
+        color,
+      );
     }
   }
 

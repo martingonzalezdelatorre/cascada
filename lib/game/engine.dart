@@ -123,7 +123,7 @@ class GameEngine {
   int _lockResets = 0;
 
   GameEngine({Random? random, this.startLevel = 1})
-      : _rng = random ?? Random() {
+    : _rng = random ?? Random() {
     reset();
   }
 
@@ -271,6 +271,11 @@ class GameEngine {
 
   void togglePause() {
     if (!gameOver) paused = !paused;
+  }
+
+  /// Pausa de forma idempotente (no hace nada si la partida terminó).
+  void pause() {
+    if (!gameOver) paused = true;
   }
 
   /// Fila en la que caería la pieza actual (para la pieza fantasma).
